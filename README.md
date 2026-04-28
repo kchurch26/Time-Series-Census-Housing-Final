@@ -10,6 +10,8 @@ examining the effect of the Federal Reserve's 2022–2023 rate hike cycle on hou
 |------|-------------|
 | `housing_analysis.Rmd` | Full annotated R code — knit this for the code appendix PDF |
 | `housing_report.Rmd`   | Written report (no code, key outputs embedded) — knit this for the report PDF |
+| `HOUST1F.csv`          | Raw FRED download (805 obs, full history) — used by both Rmd files to knit offline |
+| `housing_starts_data.csv` | Clean analysis dataset: 123 monthly observations, Jan 2015 – Mar 2025 |
 | `README.md`            | This file |
 
 ## Data
