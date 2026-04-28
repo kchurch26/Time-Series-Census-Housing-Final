@@ -1,11 +1,23 @@
-# Time-Series-Census-Housing-Final
-Time series analysis of U.S. single-family housing starts (Jan 2015 – Mar 2025), examining the effect of the Federal Reserve's 2022–2023 rate hike cycle on housing supply.
+# STAT-4840: How Did Rate Hikes Affect Housing Supply?
+**Katrina Churchill | April 2026**
+
+## Overview
+Time series analysis of U.S. single-family housing starts (Jan 2015 – Mar 2025),
+examining the effect of the Federal Reserve's 2022–2023 rate hike cycle on housing supply.
+
+## Files
+| File | Description |
+|------|-------------|
+| `housing_analysis.Rmd` | Full annotated R code — knit this for the code appendix PDF |
+| `housing_report.Rmd`   | Written report (no code, key outputs embedded) — knit this for the report PDF |
+| `README.md`            | This file |
 
 ## Data
-Data are pulled directly from the U.S. Census Bureau via URL — no manual download required.
-- **Series:** Monthly Single-Family Housing Starts
-- **Source:** https://www.census.gov/construction/nrc/index.html
-- **Units:** Thousands of housing starts
+Data are pulled directly from FRED (Federal Reserve Bank of St. Louis) via URL — no manual download or API key required.
+- **Series:** HOUST1F — New Privately-Owned Housing Units Started: 1-Unit Structures
+- **Source:** https://fred.stlouisfed.org/series/HOUST1F
+- **Original data:** U.S. Census Bureau / HUD
+- **Units:** Thousands of housing starts (Seasonally Adjusted Annual Rate)
 
 ## How to Reproduce
 
