@@ -1,0 +1,406 @@
+---
+title: "Appendix: R Code — How Did Rate Hikes Affect Housing Supply?"
+subtitle: "STAT-4840 | Time Series Analysis"
+author: "Katrina Churchill"
+date: "April 2026"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 8, fig.height = 4.5)
+```
+
+# Load Packages
+
+```{r packages}
+library(TSA)
+library(forecast)
+library(tseries)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(readr)
+library(zoo)
+library(lmtest)
+library(knitr)
+```
+
+---
+
+# Load and Clean Data
+
+Data source: FRED (Federal Reserve Bank of St. Louis), Series HOUST1F.
+New Privately-Owned Housing Units Started: 1-Unit Structures.
+Monthly, Seasonally Adjusted Annual Rate, in thousands.
+Original data from U.S. Census Bureau / HUD.
+
+```{r load-data}
+url <- "https://fred.stlouisfed.org/graph/fredgraph.csv?id=HOUST1F"
+raw <- read_csv(url, show_col_types = FALSE)
+names(raw) <- c("date", "starts")
+
+housing <- raw %>%
+  mutate(date   = as.Date(date),
+         starts = as.numeric(starts)) %>%
+  filter(date >= as.Date("2015-01-01"),
+         date <= as.Date("2025-03-01"),
+         !is.na(starts))
+
+cat("Observations:", nrow(housing), "\n")
+cat("Range:", format(min(housing$date), "%b %Y"),
+    "to", format(max(housing$date), "%b %Y"), "\n")
+
+# Convert to monthly ts object
+starts_ts <- ts(housing$starts, start = c(2015, 1), frequency = 12)
+```
+
+---
+
+# Section 1 — Preliminary Analysis
+
+## Time Series Plot
+
+Red shading marks the Federal Reserve rate hike cycle (March 2022 - July 2023).
+
+```{r ts-plot}
+hike_start <- as.Date("2022-03-01")
+hike_end   <- as.Date("2023-07-01")
+
+ggplot(housing, aes(x = date, y = starts)) +
+  annotate("rect", xmin = hike_start, xmax = hike_end,
+           ymin = -Inf, ymax = Inf, fill = "red", alpha = 0.12) +
+  geom_line(color = "steelblue", linewidth = 0.8) +
+  annotate("text", x = hike_start + 30,
+           y = max(housing$starts) * 0.95,
+           label = "Fed Rate\nHike Cycle",
+           color = "red", size = 3.5, hjust = 0) +
+  labs(title = "U.S. Single-Family Housing Starts: 2015-2025",
+       subtitle = "Thousands of units (SAAR) | Source: FRED / U.S. Census Bureau",
+       x = "Date", y = "Starts (thousands)") +
+  theme_minimal()
+```
+
+## Summary Statistics
+
+```{r summary}
+summary(starts_ts)
+cat("Std Dev:", round(sd(starts_ts), 2), "\n")
+```
+
+## Rolling Mean and SD
+
+```{r rolling}
+roll_mean <- rollmean(starts_ts, k = 12, fill = NA)
+roll_sd   <- rollapply(starts_ts, width = 12, FUN = sd, fill = NA)
+
+par(mfrow = c(2, 1), mar = c(3, 4, 2, 1))
+plot(starts_ts, main = "Series with 12-Month Rolling Mean", ylab = "Starts")
+lines(roll_mean, col = "red", lwd = 2)
+plot(roll_sd, main = "12-Month Rolling SD", ylab = "SD", col = "darkgreen")
+par(mfrow = c(1, 1))
+```
+
+## Formal Stationarity Tests
+
+```{r stationarity}
+# ADF: H0 = non-stationary (unit root present)
+adf.test(starts_ts)
+
+# KPSS: H0 = stationary
+kpss.test(starts_ts)
+```
+
+---
+
+# Section 2 — ACF, PACF, EACF
+
+```{r acf-pacf-raw}
+par(mfrow = c(1, 2))
+acf(starts_ts,  lag.max = 36, main = "ACF — Raw Series")
+pacf(starts_ts, lag.max = 36, main = "PACF — Raw Series")
+par(mfrow = c(1, 1))
+```
+
+```{r eacf-raw}
+eacf(starts_ts)
+```
+
+---
+
+# Section 3 — Transformations
+
+## Box-Cox
+
+```{r boxcox}
+BC <- BoxCox.ar(starts_ts, lambda = seq(-1, 1, 0.01))
+lambda_opt <- BC$lambda[which.max(BC$loglike)]
+cat("Optimal lambda:", round(lambda_opt, 3), "\n")
+cat("If lambda near 1: no transformation needed.\n")
+cat("If lambda near 0: log transformation appropriate.\n")
+```
+
+```{r apply-transform}
+if (abs(lambda_opt - 1) > 0.2 & abs(lambda_opt) < 0.05) {
+  starts_tr <- log(starts_ts)
+  tr_label  <- "Log-Transformed"
+} else if (abs(lambda_opt - 1) > 0.2) {
+  starts_tr <- starts_ts^lambda_opt
+  tr_label  <- paste0("Box-Cox (lambda = ", round(lambda_opt, 2), ")")
+} else {
+  starts_tr <- starts_ts
+  tr_label  <- "No transformation needed (lambda near 1)"
+}
+cat(tr_label, "\n")
+```
+
+```{r plot-transform}
+par(mfrow = c(2, 1), mar = c(3, 4, 2, 1))
+plot(starts_ts, main = "Original Series", ylab = "Starts")
+plot(starts_tr, main = tr_label, ylab = "Value")
+par(mfrow = c(1, 1))
+```
+
+## Differencing
+
+```{r diff1}
+d1 <- diff(starts_tr, differences = 1)
+
+par(mfrow = c(2, 1), mar = c(3, 4, 2, 1))
+plot(d1, main = "First-Differenced Series", ylab = "Delta")
+abline(h = 0, col = "red", lty = 2)
+acf(d1, lag.max = 36, main = "ACF After First Difference")
+par(mfrow = c(1, 1))
+
+adf.test(d1)
+kpss.test(d1)
+```
+
+```{r seasonal-diff}
+# Note: FRED HOUST1F is already seasonally adjusted by Census Bureau.
+# We attempt seasonal differencing to demonstrate the method, per course requirements.
+d_seas <- diff(starts_tr, lag = 12)
+
+par(mfrow = c(1, 2))
+acf(d_seas,  lag.max = 48, main = "ACF — Seasonal Diff")
+pacf(d_seas, lag.max = 48, main = "PACF — Seasonal Diff")
+par(mfrow = c(1, 1))
+
+adf.test(d_seas)
+```
+
+## ACF / PACF / EACF on Differenced Series
+
+```{r acf-diff}
+par(mfrow = c(1, 2))
+acf(d1,  lag.max = 36, main = "ACF — First Diff")
+pacf(d1, lag.max = 36, main = "PACF — First Diff")
+par(mfrow = c(1, 1))
+
+eacf(d1)
+```
+
+---
+
+# Section 4 — Model Identification
+
+## auto.arima
+
+```{r auto-arima}
+auto_mod <- auto.arima(starts_tr, seasonal = TRUE,
+                       stepwise = FALSE, approximation = FALSE,
+                       trace = TRUE)
+summary(auto_mod)
+```
+
+## Candidate Models
+
+```{r candidates}
+m1 <- arima(starts_tr, order = c(1, 1, 1), method = "CSS-ML")
+m2 <- arima(starts_tr, order = c(2, 1, 1), method = "CSS-ML")
+m3 <- arima(starts_tr, order = c(1, 1, 2), method = "CSS-ML")
+
+cat("ARIMA(1,1,1) AIC:", round(AIC(m1), 2), "| BIC:", round(BIC(m1), 2), "\n")
+cat("ARIMA(2,1,1) AIC:", round(AIC(m2), 2), "| BIC:", round(BIC(m2), 2), "\n")
+cat("ARIMA(1,1,2) AIC:", round(AIC(m3), 2), "| BIC:", round(BIC(m3), 2), "\n")
+cat("auto.arima  AIC:", round(AIC(auto_mod), 2), "| BIC:", round(BIC(auto_mod), 2), "\n")
+```
+
+```{r coeftests}
+coeftest(m1)
+coeftest(auto_mod)
+```
+
+## CSS vs ML Comparison
+
+```{r css-ml}
+m_css <- arima(starts_tr, order = c(1, 1, 1), method = "CSS")
+m_ml  <- arima(starts_tr, order = c(1, 1, 1), method = "ML")
+
+cat("CSS:\n"); print(round(coef(m_css), 4))
+cat("ML:\n");  print(round(coef(m_ml),  4))
+```
+
+```{r final-model}
+# Use auto.arima result as final model
+final_model <- auto_mod
+```
+
+---
+
+# Section 5 — Stationarity and Invertibility
+
+```{r roots}
+ar_phi <- final_model$model$phi
+if (length(ar_phi) > 0) {
+  ar_roots <- polyroot(c(1, -ar_phi))
+  cat("AR root moduli:", round(Mod(ar_roots), 4), "\n")
+  cat("Stationary (all > 1)?", all(Mod(ar_roots) > 1), "\n\n")
+} else {
+  cat("No AR component.\n\n")
+}
+
+ma_theta <- final_model$model$theta
+if (length(ma_theta) > 0) {
+  ma_roots <- polyroot(c(1, ma_theta))
+  cat("MA root moduli:", round(Mod(ma_roots), 4), "\n")
+  cat("Invertible (all > 1)?", all(Mod(ma_roots) > 1), "\n")
+} else {
+  cat("No MA component.\n")
+}
+```
+
+---
+
+# Section 6 — Residual Diagnostics
+
+```{r residuals}
+res <- residuals(final_model)
+
+par(mfrow = c(2, 2), mar = c(4, 4, 2, 1))
+plot(res, main = "Residuals", ylab = "Residual", type = "l")
+abline(h = 0, col = "red", lty = 2)
+acf(res,  lag.max = 36, main = "ACF of Residuals")
+pacf(res, lag.max = 36, main = "PACF of Residuals")
+qqnorm(res); qqline(res, col = "red")
+par(mfrow = c(1, 1))
+
+# Ljung-Box: H0 = residuals are white noise
+Box.test(res, lag = 12, type = "Ljung-Box", fitdf = length(final_model$coef))
+
+# Shapiro-Wilk normality
+shapiro.test(as.numeric(res))
+```
+
+---
+
+# Section 7 — Train / Test Split
+
+```{r train-test}
+# Hold out last 12 months
+# Use window() to preserve ts class (head/tail strips it)
+n        <- length(starts_tr)
+train_ts <- window(starts_tr, end   = time(starts_tr)[n - 12])
+test_ts  <- window(starts_tr, start = time(starts_tr)[n - 11])
+
+cat("Train:", length(train_ts), "obs\n")
+cat("Test: ", length(test_ts),  "obs\n")
+```
+
+```{r refit}
+# Pull order from final_model safely
+p <- final_model$arma[1]
+q <- final_model$arma[2]
+P <- final_model$arma[3]
+Q <- final_model$arma[4]
+d <- final_model$arma[6]
+D <- final_model$arma[7]
+s <- final_model$arma[5]
+
+cat("Model order — p:", p, "d:", d, "q:", q,
+    "| P:", P, "D:", D, "Q:", Q, "s:", s, "\n")
+
+# Use Arima() from forecast package — more robust than arima() for refitting
+if (s > 1) {
+  train_model <- Arima(train_ts,
+                       order    = c(p, d, q),
+                       seasonal = list(order = c(P, D, Q), period = s))
+} else {
+  train_model <- Arima(train_ts, order = c(p, d, q))
+}
+print(train_model)
+```
+
+```{r accuracy}
+fc_test <- forecast(train_model, h = 12, level = 95)
+
+# Back-transform
+if (tr_label == "Log-Transformed") {
+  fc_vals  <- exp(as.numeric(fc_test$mean))
+  act_vals <- exp(as.numeric(test_ts))
+} else if (tr_label != "No transformation needed (lambda near 1)") {
+  fc_vals  <- as.numeric(fc_test$mean)^(1 / lambda_opt)
+  act_vals <- as.numeric(test_ts)^(1 / lambda_opt)
+} else {
+  fc_vals  <- as.numeric(fc_test$mean)
+  act_vals <- as.numeric(test_ts)
+}
+
+mae  <- mean(abs(fc_vals - act_vals))
+rmse <- sqrt(mean((fc_vals - act_vals)^2))
+mape <- mean(abs((fc_vals - act_vals) / act_vals)) * 100
+
+cat("MAE: ",  round(mae,  2), "\n")
+cat("RMSE:",  round(rmse, 2), "\n")
+cat("MAPE:",  round(mape, 2), "%\n")
+```
+
+---
+
+# Section 8 — 12-Month Forward Forecast
+
+```{r forecast}
+fc_final <- forecast(final_model, h = 12, level = c(80, 95))
+plot(fc_final,
+     main = "12-Month Forecast: Single-Family Housing Starts",
+     ylab = "Starts (thousands)", xlab = "Year")
+```
+
+```{r forecast-table}
+fc_dates <- seq(max(housing$date) %m+% months(1),
+                by = "month", length.out = 12)
+
+back_tr <- function(x) {
+  if (tr_label == "Log-Transformed") return(exp(x))
+  if (tr_label != "No transformation needed (lambda near 1)") return(x^(1/lambda_opt))
+  return(x)
+}
+
+fc_df <- data.frame(
+  Month    = format(fc_dates, "%b %Y"),
+  Forecast = round(back_tr(as.numeric(fc_final$mean)), 1),
+  Lo_95    = round(back_tr(as.numeric(fc_final$lower[, 2])), 1),
+  Hi_95    = round(back_tr(as.numeric(fc_final$upper[, 2])), 1)
+)
+kable(fc_df, col.names = c("Month", "Forecast", "Lower 95%", "Upper 95%"))
+```
+
+---
+
+# Section 9 — Pre vs Post Rate Hike Comparison
+
+```{r subseries}
+pre  <- window(starts_ts, end   = c(2022, 2))
+post <- window(starts_ts, start = c(2023, 8))
+
+m_pre  <- arima(pre,  order = c(1, 0, 0), method = "CSS-ML")
+m_post <- arima(post, order = c(1, 0, 0), method = "CSS-ML")
+
+cat("AR(1) phi before rate hikes:", round(coef(m_pre)["ar1"],  4), "\n")
+cat("AR(1) phi after rate hikes: ", round(coef(m_post)["ar1"], 4), "\n")
+```
+
